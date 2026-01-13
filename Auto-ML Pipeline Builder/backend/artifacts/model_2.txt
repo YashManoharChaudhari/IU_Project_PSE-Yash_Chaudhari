@@ -1,0 +1,2 @@
+Selected Model: RandomForestClassifier
+Accuracy: 0.6
