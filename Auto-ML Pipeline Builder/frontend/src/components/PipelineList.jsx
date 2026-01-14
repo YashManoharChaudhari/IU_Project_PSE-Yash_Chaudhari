@@ -20,8 +20,10 @@ export default function PipelineList({ selectedId, onSelect }) {
         if (attemptsRef.current < 3) {
           setTimeout(loadPipelines, 1500); // retry after 1.5s
         } else {
-          setError("Backend is waking up. Please refresh once.");
-          setLoading(false);
+          // Backend cold start is normal before any pipeline exists
+          setPipelines([]);   // show empty state
+          setError(null);     // do not show an error to the user
+          setLoading(false);  // stop loading indicator
         }
       }
     };
