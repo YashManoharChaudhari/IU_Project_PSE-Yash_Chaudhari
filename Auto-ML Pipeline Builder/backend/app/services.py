@@ -1,206 +1,210 @@
+import threading
 import logging
 from pathlib import Path
-from .models import pipelines
-
-DATA_DIR = Path(__file__).parent.parent / "data"
-ARTIFACT_DIR = Path(__file__).parent.parent / "artifacts"
-ARTIFACT_DIR.mkdir(exist_ok=True)
-
-def create_pipeline(config: dict):
-    pipeline_id = len(pipelines) + 1
-    pipelines[pipeline_id] = {
-        "config": config,
-        "status": "created",
-        "task_type": None,
-        "model_name": None,
-        "metric": None,
-        "metric_name": None,
-        "artifacts": None,
-    }
-    return {"pipeline_id": pipeline_id, "status": "created"}
-
-def list_pipelines():
-    return [
-        {"pipeline_id": pid, "status": p["status"]}
-        for pid, p in pipelines.items()
-    ]
-
-def get_pipeline(pipeline_id: int):
-    return pipelines.get(pipeline_id, {"error": "Pipeline not found"})
-
-async def execute_pipeline_async(pipeline_id: int):
-    import pandas as pd
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-    from sklearn.metrics import accuracy_score, mean_squared_error
-    from sklearn.linear_model import LogisticRegression, LinearRegression
-    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-    from sklearn.svm import SVC, SVR
-
-    pipeline = pipelines.get(pipeline_id)
-    if not pipeline:
-        return
-
-    try:
-        pipeline["status"] = "running"
-
-        dataset_name = Path(pipeline["config"]["dataset_path"]).name
-        target = pipeline["config"]["target_column"]
-        dataset_path = DATA_DIR / dataset_name
-
-        if not dataset_path.exists():
-            raise FileNotFoundError(f"{dataset_path} not found")
-
-        df = pd.read_csv(dataset_path)
-        X = pd.get_dummies(df.drop(columns=[target]), drop_first=True)
-        y = df[target]
-
-        # Detect task type
-        if y.dtype in ["float64", "float32"] and y.nunique() > 20:
-            task_type = "regression"
-        else:
-            task_type = "classification"
-
-        pipeline["task_type"] = task_type
-
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, random_state=42
-        )
-
-        if task_type == "classification":
-            models = {
-                "LogisticRegression": Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("model", LogisticRegression(max_iter=1000))
-                ]),
-                "RandomForestClassifier": RandomForestClassifier(),
-                "SupportVectorMachine": Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("model", SVC())
-                ])
-            }
-            metric_fn = accuracy_score
-            better = lambda s, b: b is None or s > b
-            metric_name = "accuracy"
-        else:
-            models = {
-                "LinearRegression": Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("model", LinearRegression())
-                ]),
-                "RandomForestRegressor": RandomForestRegressor(),
-                "SupportVectorRegressor": Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("model", SVR())
-                ])
-            }
-            metric_fn = lambda y, p: mean_squared_error(y, p, squared=False)
-            better = lambda s, b: b is None or s < b
-            metric_name = "rmse"
-
-        best_score = None
-        best_model_name = None
-
-        for name, model in models.items():
-            model.fit(X_train, y_train)
-            preds = model.predict(X_test)
-            score = metric_fn(y_test, preds)
-            if better(score, best_score):
-                best_score = score
-                best_model_name = name
-
-        pipeline["model_name"] = best_model_name
-        pipeline["metric"] = round(float(best_score), 3)
-        pipeline["metric_name"] = metric_name
-
-        model_file = ARTIFACT_DIR / f"model_{pipeline_id}.txt"
-        script_file = ARTIFACT_DIR / f"pipeline_{pipeline_id}.py"
-
-        model_file.write_text(
-            f"Task: {task_type}\n"
-            f"Model: {best_model_name}\n"
-            f"{metric_name.upper()}: {pipeline['metric']}"
-        )
-
-        script_file.write_text(f'''
-# Auto-generated ML pipeline
-# Task type: {task_type}
-# Selected model: {best_model_name}
-# Metric ({metric_name}): {pipeline["metric"]}
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, mean_squared_error
+from sklearn.metrics import accuracy_score, mean_squared_error, r2_score
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.svm import SVC, SVR
 
-DATASET_PATH = "{dataset_name}"
-TARGET_COLUMN = "{target}"
+# ---------------------------------
+# In-memory pipeline store
+# ---------------------------------
+PIPELINES = {}
+PIPELINE_COUNTER = 1
 
-# Load dataset
-df = pd.read_csv(DATASET_PATH)
+# ---------------------------------
+# Data & artifact directories
+# ---------------------------------
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / "data"
+ARTIFACT_DIR = BASE_DIR / "artifacts"
 
-X = df.drop(columns=[TARGET_COLUMN])
-y = df[TARGET_COLUMN]
+DATA_DIR.mkdir(exist_ok=True)
+ARTIFACT_DIR.mkdir(exist_ok=True)
 
-X = pd.get_dummies(X, drop_first=True)
+logging.basicConfig(level=logging.INFO)
+
+# ---------------------------------
+# Pipeline CRUD
+# ---------------------------------
+def create_pipeline(config: dict):
+    global PIPELINE_COUNTER
+
+    pipeline_id = PIPELINE_COUNTER
+    PIPELINE_COUNTER += 1
+
+    PIPELINES[pipeline_id] = {
+        "pipeline_id": pipeline_id,
+        "config": config,
+        "status": "created",
+        "model_name": None,
+        "metric": None,
+        "artifacts": None,
+    }
+
+    return PIPELINES[pipeline_id]
+
+
+def list_pipelines():
+    return list(PIPELINES.values())
+
+
+def get_pipeline(pipeline_id: int):
+    return PIPELINES.get(pipeline_id)
+
+
+def update_pipeline(pipeline_id: int, **updates):
+    if pipeline_id in PIPELINES:
+        PIPELINES[pipeline_id].update(updates)
+
+
+# ---------------------------------
+# Pipeline execution
+# ---------------------------------
+def execute_pipeline_async(pipeline_id: int):
+    thread = threading.Thread(
+        target=execute_pipeline,
+        args=(pipeline_id,),
+        daemon=True,
+    )
+    thread.start()
+
+
+def execute_pipeline(pipeline_id: int):
+    try:
+        logging.info(f"Pipeline {pipeline_id} started")
+        update_pipeline(pipeline_id, status="running")
+
+        pipeline = get_pipeline(pipeline_id)
+        config = pipeline["config"]
+
+        dataset_name = config["dataset_name"]
+        target = config["target_column"]
+
+        dataset_path = DATA_DIR / dataset_name
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Dataset {dataset_name} not found")
+
+        # -----------------------------
+        # Load dataset
+        # -----------------------------
+        df = pd.read_csv(dataset_path)
+
+        if target not in df.columns:
+            raise ValueError(f"Target column '{target}' not found in dataset")
+
+        X = df.drop(columns=[target])
+        y = df[target]
+
+        X = pd.get_dummies(X, drop_first=True)
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.3, random_state=42
+        )
+
+        # -----------------------------
+        # Decide task type
+        # -----------------------------
+        is_classification = y.nunique() <= 20 and y.dtype != float
+
+        # -----------------------------
+        # Candidate models
+        # -----------------------------
+        if is_classification:
+            models = {
+                "LogisticRegression": Pipeline(
+                    [
+                        ("scaler", StandardScaler()),
+                        ("model", LogisticRegression(max_iter=1000)),
+                    ]
+                ),
+                "RandomForestClassifier": RandomForestClassifier(random_state=42),
+            }
+        else:
+            models = {
+                "LinearRegression": Pipeline(
+                    [
+                        ("scaler", StandardScaler()),
+                        ("model", LinearRegression()),
+                    ]
+                ),
+                "RandomForestRegressor": RandomForestRegressor(random_state=42),
+            }
+
+        best_model_name = None
+        best_model = None
+        best_metric = None
+
+        # -----------------------------
+        # Train & evaluate
+        # -----------------------------
+        for name, model in models.items():
+            model.fit(X_train, y_train)
+            preds = model.predict(X_test)
+
+            if is_classification:
+                metric = accuracy_score(y_test, preds)
+            else:
+                metric = r2_score(y_test, preds)
+
+            if best_metric is None or metric > best_metric:
+                best_metric = metric
+                best_model = model
+                best_model_name = name
+
+        # -----------------------------
+        # Save artifacts
+        # -----------------------------
+        model_path = ARTIFACT_DIR / f"model_{pipeline_id}.txt"
+        pipeline_path = ARTIFACT_DIR / f"pipeline_{pipeline_id}.py"
+
+        model_path.write_text(
+            f"Selected model: {best_model_name}\nMetric: {best_metric}"
+        )
+
+        pipeline_path.write_text(
+            f"""# Auto-generated ML pipeline
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, r2_score
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+DATASET = "{dataset_name}"
+TARGET = "{target}"
+
+df = pd.read_csv(DATASET)
+X = pd.get_dummies(df.drop(columns=[TARGET]), drop_first=True)
+y = df[TARGET]
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.3, random_state=42
 )
 
-# Build selected model
-model_name = "{best_model_name}"
+# Selected model: {best_model_name}
+"""
+        )
 
-if model_name == "LogisticRegression":
-    model = Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", LogisticRegression(max_iter=1000))
-    ])
-elif model_name == "RandomForestClassifier":
-    model = RandomForestClassifier(random_state=42)
-elif model_name == "SupportVectorMachine":
-    model = Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", SVC())
-    ])
-elif model_name == "LinearRegression":
-    model = Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", LinearRegression())
-    ])
-elif model_name == "RandomForestRegressor":
-    model = RandomForestRegressor(random_state=42)
-else:
-    model = Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", SVR())
-    ])
+        update_pipeline(
+            pipeline_id,
+            status="completed",
+            model_name=best_model_name,
+            metric=best_metric,
+            artifacts={
+                "model": f"/artifacts/model_{pipeline_id}.txt",
+                "pipeline": f"/artifacts/pipeline_{pipeline_id}.py",
+            },
+        )
 
-model.fit(X_train, y_train)
-preds = model.predict(X_test)
+        logging.info(f"Pipeline {pipeline_id} completed")
 
-if "{task_type}" == "classification":
-    metric = accuracy_score(y_test, preds)
-    print("Accuracy:", metric)
-else:
-    metric = mean_squared_error(y_test, preds, squared=False)
-    print("RMSE:", metric)
-''')
-
-        BASE_URL = "http://localhost:8000"
-
-        pipeline["artifacts"] = {
-            "model": f"{BASE_URL}/download/model/{model_file.name}",
-            "script": f"{BASE_URL}/download/script/{script_file.name}",
-        }
-
-        pipeline["status"] = "completed"
-
-    except Exception:
+    except Exception as e:
         logging.exception("Pipeline execution failed")
-        pipeline["status"] = "failed"
+        update_pipeline(pipeline_id, status="failed")
