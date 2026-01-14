@@ -1,29 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { listPipelines } from "../api";
 
 export default function PipelineList({ selectedId, onSelect }) {
   const [pipelines, setPipelines] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const attemptsRef = useRef(0);
 
   useEffect(() => {
-    let attempts = 0;
-
     const loadPipelines = async () => {
       try {
         const res = await listPipelines();
         setPipelines(Array.isArray(res.data) ? res.data : []);
         setError(null);
+        setLoading(false);
       } catch (err) {
-        attempts += 1;
+        attemptsRef.current += 1;
 
-        if (attempts < 3) {
+        if (attemptsRef.current < 3) {
           setTimeout(loadPipelines, 1500); // retry after 1.5s
         } else {
-          setError("Backend waking up. Please refresh once.");
+          setError("Backend is waking up. Please refresh once.");
+          setLoading(false);
         }
-      } finally {
-        setLoading(false);
       }
     };
 
