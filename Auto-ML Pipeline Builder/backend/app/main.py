@@ -26,15 +26,3 @@ app.mount(
     StaticFiles(directory=ARTIFACT_DIR),
     name="artifacts",
 )
-
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-
-ARTIFACT_DIR = Path(__file__).parent.parent / "artifacts"
-ARTIFACT_DIR.mkdir(exist_ok=True)
-
-app.mount(
-    "/artifacts",
-    StaticFiles(directory=ARTIFACT_DIR),
-    name="artifacts",
-)
