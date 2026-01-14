@@ -1,69 +1,57 @@
 import { useEffect, useState } from "react";
-import { listPipelines, getPipeline } from "../api";
+import { listPipelines } from "../api";
 
 export default function PipelineList({ selectedId, onSelect }) {
   const [pipelines, setPipelines] = useState([]);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const load = async () => {
-      const res = await listPipelines();
-      setPipelines(res.data);
+    const loadPipelines = async () => {
+      try {
+        const res = await listPipelines();
+        setPipelines(Array.isArray(res.data) ? res.data : []);
+      } catch (err) {
+        console.error("Failed to load pipelines", err);
+        setError("Failed to load pipelines");
+      }
     };
 
-    load();
-    const interval = setInterval(load, 3000);
-    return () => clearInterval(interval);
+    loadPipelines();
   }, []);
 
-  const statusColor = {
-    created: "#9CA3AF",
-    running: "#F59E0B",
-    completed: "#10B981",
-    failed: "#EF4444",
-  };
-
-  if (pipelines.length === 0) {
+  if (error) {
     return (
-      <div className="card empty">
+      <div className="card">
         <h3>📦 Pipelines</h3>
-        <p>Create your first pipeline to begin automated ML.</p>
+        <p style={{ color: "#ef4444" }}>{error}</p>
       </div>
     );
   }
 
   return (
     <div className="card">
-      <h3 style={{ marginBottom: "16px" }}>📦 Pipelines</h3>
+      <h3>📦 Pipelines</h3>
 
-      <div className="pipeline-list">
-        {pipelines.map((p) => (
-          <div
-            key={p.pipeline_id}
-            className={`pipeline-item ${
-              selectedId === p.pipeline_id ? "selected" : ""
-            }`}
-            onClick={() => onSelect(p.pipeline_id)}
-          >
-            <div className="pipeline-left">
+      {pipelines.length === 0 ? (
+        <p>No pipelines created yet.</p>
+      ) : (
+        <ul className="pipeline-list">
+          {pipelines.map((p) => (
+            <li
+              key={p.pipeline_id}
+              onClick={() => onSelect(p.pipeline_id)}
+              className={
+                selectedId === p.pipeline_id ? "selected pipeline-item" : "pipeline-item"
+              }
+            >
               <strong>Pipeline #{p.pipeline_id}</strong>
-              <span
-                className="status-pill"
-                style={{ backgroundColor: statusColor[p.status] }}
-              >
-                {p.status.toUpperCase()}
+              <span style={{ marginLeft: "8px", opacity: 0.7 }}>
+                ({p.status})
               </span>
-            </div>
-
-            <div className="pipeline-right">
-              {p.status === "completed" && (
-                <span className="done">✔ Ready</span>
-              )}
-              {p.status === "running" && <span className="run">⏳ Running</span>}
-              {p.status === "failed" && <span className="fail">✖ Failed</span>}
-            </div>
-          </div>
-        ))}
-      </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
