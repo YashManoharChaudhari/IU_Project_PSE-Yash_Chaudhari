@@ -6,16 +6,24 @@ import PipelineDetails from "./components/PipelineDetails";
 
 export default function App() {
   const [selectedPipeline, setSelectedPipeline] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
-    <div className="app-container">
+    <div className="app">
       <Header />
-      <CreatePipeline onCreated={setSelectedPipeline} />
-      <PipelineList
-        selectedId={selectedPipeline}
-        onSelect={setSelectedPipeline}
-      />
-      <PipelineDetails pipelineId={selectedPipeline} />
+
+      <div className="container">
+        <CreatePipeline onCreated={() => setRefreshKey(k => k + 1)} />
+
+        <PipelineList
+          key={refreshKey}
+          onSelect={setSelectedPipeline}
+        />
+
+        {selectedPipeline && (
+          <PipelineDetails pipelineId={selectedPipeline.id} />
+        )}
+      </div>
     </div>
   );
 }

@@ -2,53 +2,42 @@ import axios from "axios";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
+/* Upload CSV */
 export async function uploadDataset(file) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await axios.post(
-    `${API_BASE}/upload-dataset`,
-    formData,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    }
-  );
+  const res = await axios.post(`${API_BASE}/upload-dataset`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
 
-  return response.data; 
+  return res.data; // { dataset_path: "..." }
 }
 
-export async function createPipeline(datasetName, target) {
-  const response = await axios.post(
-    `${API_BASE}/pipeline`,
-    {
-      dataset_name: datasetName,
-      target: target,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
+/* Create pipeline */
+export async function createPipeline(dataset_path, target_column) {
+  const res = await axios.post(`${API_BASE}/pipeline`, {
+    dataset_path,
+    target_column,
+  });
 
-  return response.data;
+  return res.data;
 }
 
+/* List pipelines */
 export async function getPipelines() {
-  const response = await axios.get(`${API_BASE}/pipelines`);
-  return response.data;
+  const res = await axios.get(`${API_BASE}/pipelines`);
+  return res.data;
 }
 
-export async function getPipeline(pipelineId) {
-  const response = await axios.get(`${API_BASE}/pipeline/${pipelineId}`);
-  return response.data;
+/* Get pipeline details */
+export async function getPipeline(id) {
+  const res = await axios.get(`${API_BASE}/pipeline/${id}`);
+  return res.data;
 }
 
-export async function executePipeline(pipelineId) {
-  const response = await axios.post(
-    `${API_BASE}/pipeline/${pipelineId}/execute`
-  );
-  return response.data;
+/* Execute pipeline */
+export async function executePipeline(id) {
+  const res = await axios.post(`${API_BASE}/pipeline/${id}/execute`);
+  return res.data;
 }
