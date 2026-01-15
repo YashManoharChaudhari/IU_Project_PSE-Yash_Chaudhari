@@ -1,80 +1,47 @@
-import { useEffect, useState, useRef } from "react";
-import { listPipelines } from "../api";
+import { useEffect, useState } from "react";
+import { getPipelines } from "../api";
 
-export default function PipelineList({ selectedId, onSelect }) {
+export default function PipelineList({ onSelect }) {
   const [pipelines, setPipelines] = useState([]);
-  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const attemptsRef = useRef(0);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const loadPipelines = async () => {
+    async function fetchPipelines() {
       try {
-        const res = await listPipelines();
-        setPipelines(Array.isArray(res.data) ? res.data : []);
-        setError(null);
-        setLoading(false);
+        const data = await getPipelines();
+        setPipelines(data || []);
       } catch (err) {
-        attemptsRef.current += 1;
-
-        if (attemptsRef.current < 3) {
-          setTimeout(loadPipelines, 1500); // retry after 1.5s
-        } else {
-          // Backend cold start is normal before any pipeline exists
-          setPipelines([]);   // show empty state
-          setError(null);     // do not show an error to the user
-          setLoading(false);  // stop loading indicator
-        }
+        setError("Failed to load pipelines");
+      } finally {
+        setLoading(false);
       }
-    };
+    }
 
-    loadPipelines();
+    fetchPipelines();
   }, []);
-
-  if (loading) {
-    return (
-      <div className="card">
-        <h3>📦 Pipelines</h3>
-        <p>Loading pipelines…</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="card">
-        <h3>📦 Pipelines</h3>
-        <p style={{ color: "#facc15" }}>{error}</p>
-      </div>
-    );
-  }
 
   return (
     <div className="card">
-      <h3>📦 Pipelines</h3>
+      <h2>📦 Pipelines</h2>
 
-      {pipelines.length === 0 ? (
-        <p>No pipelines created yet.</p>
-      ) : (
+      {loading && <p>Loading pipelines…</p>}
+
+      {!loading && pipelines.length === 0 && (
+        <p className="muted">No pipelines created yet.</p>
+      )}
+
+      {!loading && pipelines.length > 0 && (
         <ul className="pipeline-list">
           {pipelines.map((p) => (
-            <li
-              key={p.pipeline_id}
-              onClick={() => onSelect(p.pipeline_id)}
-              className={
-                selectedId === p.pipeline_id
-                  ? "selected pipeline-item"
-                  : "pipeline-item"
-              }
-            >
-              <strong>Pipeline #{p.pipeline_id}</strong>
-              <span style={{ marginLeft: "8px", opacity: 0.7 }}>
-                ({p.status})
-              </span>
+            <li key={p.id} onClick={() => onSelect(p)}>
+              {p.name}
             </li>
           ))}
         </ul>
       )}
+
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }
