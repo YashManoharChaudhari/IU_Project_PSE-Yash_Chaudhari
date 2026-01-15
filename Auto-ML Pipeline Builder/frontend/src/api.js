@@ -1,27 +1,54 @@
 import axios from "axios";
 
-const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
-});
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
-export const createPipeline = (config) => API.post("/pipeline", config);
-export const listPipelines = () => API.get("/pipelines");
-export const getPipeline = (id) => API.get(`/pipeline/${id}`);
-export const runPipeline = (id) => API.post(`/pipeline/${id}/execute`);
-
-export async function createPipeline(file, target) {
+export async function uploadDataset(file) {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("target", target);
 
-  const res = await fetch(`${API_BASE}/pipeline`, {
-    method: "POST",
-    body: formData,
-  });
+  const response = await axios.post(
+    `${API_BASE}/upload-dataset`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    }
+  );
 
-  if (!res.ok) {
-    throw new Error("Pipeline creation failed");
-  }
+  return response.data; 
+}
 
-  return res.json();
+export async function createPipeline(datasetName, target) {
+  const response = await axios.post(
+    `${API_BASE}/pipeline`,
+    {
+      dataset_name: datasetName,
+      target: target,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  return response.data;
+}
+
+export async function getPipelines() {
+  const response = await axios.get(`${API_BASE}/pipelines`);
+  return response.data;
+}
+
+export async function getPipeline(pipelineId) {
+  const response = await axios.get(`${API_BASE}/pipeline/${pipelineId}`);
+  return response.data;
+}
+
+export async function executePipeline(pipelineId) {
+  const response = await axios.post(
+    `${API_BASE}/pipeline/${pipelineId}/execute`
+  );
+  return response.data;
 }
