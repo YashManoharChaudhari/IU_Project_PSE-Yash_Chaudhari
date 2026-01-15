@@ -8,15 +8,25 @@ export default function CreatePipeline({ onCreated }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!file || !target) return;
-
+  
+    if (!file || !target) {
+      alert("Please upload a CSV file and enter a target column.");
+      return;
+    }
+  
     setLoading(true);
-    await createPipeline(file, target);
-    setLoading(false);
-
-    setFile(null);
-    setTarget("");
-    onCreated();
+  
+    try {
+      await createPipeline(file, target);
+      setFile(null);
+      setTarget("");
+      onCreated(); 
+    } catch (err) {
+      console.error(err);
+      alert("Failed to create pipeline. Backend may be waking up.");
+    } finally {
+      setLoading(false); 
+    }
   }
 
   return (
