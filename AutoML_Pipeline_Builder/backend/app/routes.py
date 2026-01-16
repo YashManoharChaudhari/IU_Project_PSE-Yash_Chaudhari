@@ -70,12 +70,16 @@ def execute_pipeline(pipeline_id: int):
 # -------------------------------
 # Download pipeline as .py
 # -------------------------------
+from fastapi.responses import FileResponse
+from pathlib import Path
+
 @router.get("/pipeline/{pipeline_id}/download")
 def download_pipeline(pipeline_id: int):
-    file_path = Path("exported_pipelines") / f"pipeline_{pipeline_id}.py"
+    base_dir = Path(__file__).resolve().parent
+    file_path = base_dir / "exported_pipelines" / f"pipeline_{pipeline_id}.py"
 
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Pipeline file not found")
+        return {"error": f"Pipeline file pipeline_{pipeline_id}.py not found"}
 
     return FileResponse(
         path=file_path,
