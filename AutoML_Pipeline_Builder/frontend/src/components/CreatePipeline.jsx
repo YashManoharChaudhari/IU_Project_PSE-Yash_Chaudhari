@@ -2,51 +2,43 @@ import { useState } from "react";
 import { uploadDataset, createPipeline } from "../api";
 
 export default function CreatePipeline({ onCreated }) {
-  console.log("CreatePipeline component loaded");
   const [file, setFile] = useState(null);
   const [target, setTarget] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
-  
+
     if (!file || !target) {
       alert("Upload a CSV file and enter target column");
       return;
     }
-  
+
     setLoading(true);
-  
+
     try {
-      const uploadRes = await uploadDataset(file);
-  
-      // 🔍 DEBUG LOG 1 — what upload endpoint returns
-      console.log("UPLOAD RESPONSE:", uploadRes);
-  
-      const datasetPath =
-        uploadRes.dataset_path ||
-        uploadRes.path ||
-        `uploads/${file.name}`;
-  
-      // 🔍 DEBUG LOG 2 — what will be sent to backend
-      console.log("ABOUT TO SEND:", {
-        dataset_path: datasetPath,
-        target_column: target
-      });
-  
-      if (!datasetPath || !target.trim()) {
-        throw new Error("Invalid dataset path or target");
-      }
-  
-      await createPipeline(datasetPath, target);
-  
+      const upload = await uploadDataset(file);
+      const pipeline = await createPipeline(upload.dataset_path, target);
+
+      alert("Pipeline created successfully!");
+
+      // ✅ reset UI state
       setFile(null);
       setTarget("");
-      onCreated();
+
+      // ✅ refresh pipelines (important: await so state updates correctly)
+      if (onCreated) {
+        await onCreated();
+      }
     } catch (err) {
-      console.error("PIPELINE ERROR:", err);
-      alert("Pipeline creation failed");
+      console.error("Pipeline creation failed:", err);
+      alert(
+        err?.response?.data?.detail ||
+        err.message ||
+        "Pipeline creation failed"
+      );
     } finally {
+      // ✅ ALWAYS reset loading
       setLoading(false);
     }
   }
@@ -60,6 +52,7 @@ export default function CreatePipeline({ onCreated }) {
           type="file"
           accept=".csv"
           onChange={(e) => setFile(e.target.files[0])}
+          disabled={loading}
         />
 
         <input
@@ -67,11 +60,16 @@ export default function CreatePipeline({ onCreated }) {
           placeholder="Target column (e.g. label)"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
+          disabled={loading}
         />
 
-        <button type="submit" disabled={loading}>
-          {loading ? "Creating..." : "Create Pipeline"}
-        </button>
+        <button
+          type="submit"
+          disabled={loading}
+          className="primary-btn"
+        >
+  {loading ? "Creating..." : "Create Pipeline"}
+</button>
       </form>
     </div>
   );

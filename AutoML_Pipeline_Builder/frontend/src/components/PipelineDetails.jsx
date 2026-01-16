@@ -1,47 +1,76 @@
-import { useEffect, useState } from "react";
-import { getPipeline, executePipeline } from "../api";
+export default function PipelineDetails({ pipeline }) {
+  if (!pipeline) {
+    return (
+      <div className="card">
+        <p className="muted">Select a pipeline to see details.</p>
+      </div>
+    );
+  }
 
-export default function PipelineDetails({ pipelineId }) {
-  const [pipeline, setPipeline] = useState(null);
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE}/pipeline/${pipeline.id}/download`
+      );
 
-  useEffect(() => {
-    let timeout;
-
-    async function load() {
-      const data = await getPipeline(pipelineId);
-      setPipeline(data);
-
-      if (data.status === "running") {
-        timeout = setTimeout(load, 3000);
+      if (!response.ok) {
+        throw new Error("Download failed");
       }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("python")) {
+        throw new Error("Invalid file type received");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pipeline_${pipeline.id}.py`;
+      document.body.appendChild(a);
+      a.click();
+      
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to download ML pipeline. Please try again.");
     }
-
-    load();
-    return () => clearTimeout(timeout);
-  }, [pipelineId]);
-
-  if (!pipeline) return null;
+  };
 
   return (
     <div className="card">
-      <h2>📊 Pipeline Details</h2>
-      <p>Status: {pipeline.status}</p>
-      <p>Model: {pipeline.model || "-"}</p>
-      <p>Metric: {JSON.stringify(pipeline.metric)}</p>
+      <h3>📊 Pipeline Details</h3>
 
-      {pipeline.status === "created" && (
-        <button onClick={() => executePipeline(pipelineId)}>
-          ▶ Run Pipeline
-        </button>
-      )}
+      <button
+        className="primary-btn"
+        onClick={handleDownload}
+        disabled={pipeline.status !== "completed"}
+      >
+        ⬇️ Download ML Pipeline (.py)
+      </button>
 
-      {pipeline.status === "completed" && (
-        <a
-          href={`${import.meta.env.VITE_API_BASE_URL}/pipeline/${pipelineId}/download-script`}
-          download
-        >
-          ⬇ Download Script
-        </a>
+      <p className="muted" style={{ marginTop: "6px" }}>
+        Includes preprocessing, training, evaluation, and model selection logic.
+      </p>
+
+      <p><strong>ID:</strong> {pipeline.id}</p>
+      <p><strong>Status:</strong> {pipeline.status}</p>
+      <p><strong>Dataset:</strong> {pipeline.dataset_path}</p>
+      <p><strong>Target:</strong> {pipeline.target_column}</p>
+      <p><strong>Model:</strong> {pipeline.model}</p>
+
+      {pipeline.metric !== null && (
+        <p>
+          <strong>
+            {pipeline.problem_type === "classification"
+              ? "Accuracy"
+              : "R² Score"}
+            :
+          </strong>{" "}
+          {pipeline.problem_type === "classification"
+            ? `${(pipeline.metric * 100).toFixed(2)}%`
+            : pipeline.metric.toFixed(3)}
+        </p>
       )}
     </div>
   );

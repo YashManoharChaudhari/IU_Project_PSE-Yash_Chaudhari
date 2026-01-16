@@ -1,3 +1,0 @@
-Task: classification
-Model: LogisticRegression
-ACCURACY: 1.0

@@ -1,3 +1,0 @@
-Simulated trained model
-Model: baseline_model
-Metric: 0.85

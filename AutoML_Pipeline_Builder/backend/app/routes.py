@@ -1,37 +1,84 @@
-from fastapi import APIRouter, UploadFile, File
-from .models import PipelineCreateRequest
-from .services import (
-    save_dataset,
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+from pathlib import Path
+import os
+import shutil
+
+from app.models import PipelineCreateRequest
+from app.services import (
     create_pipeline,
-    execute_pipeline_async,
-    list_pipelines,
-    get_pipeline,
-    download_pipeline_script,
+    run_pipeline,
+    PIPELINES,
+    generate_pipeline_py,
 )
 
 router = APIRouter()
 
+# -------------------------------
+# Paths & directories
+# -------------------------------
+UPLOAD_DIR = Path("uploads")
+EXPORT_DIR = Path("exported_pipelines")
+
+UPLOAD_DIR.mkdir(exist_ok=True)
+EXPORT_DIR.mkdir(exist_ok=True)
+
+# -------------------------------
+# Upload dataset
+# -------------------------------
 @router.post("/upload-dataset")
 async def upload_dataset(file: UploadFile = File(...)):
-    return save_dataset(file)
+    file_path = UPLOAD_DIR / file.filename
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
+    return {"dataset_path": str(file_path)}
+
+# -------------------------------
+# Create pipeline
+# -------------------------------
 @router.post("/pipeline")
 def create_pipeline_route(req: PipelineCreateRequest):
-    return create_pipeline(req)
+    pipeline = create_pipeline(req.dataset_path, req.target_column)
 
-@router.post("/pipeline/{pipeline_id}/execute")
-def run_pipeline(pipeline_id: int):
-    execute_pipeline_async(pipeline_id)
-    return {"status": "started"}
+    # generate downloadable python pipeline
+    generate_pipeline_py(
+    pipeline_id=pipeline["id"],
+    dataset_path=req.dataset_path,
+    target_column=req.target_column,
+    problem_type=pipeline["problem_type"],
+    selected_model=pipeline["model"],
+    metric=pipeline["metric"],
+)
 
+    return pipeline
+
+# -------------------------------
+# List pipelines
+# -------------------------------
 @router.get("/pipelines")
-def pipelines():
-    return list_pipelines()
+def list_pipelines():
+    return PIPELINES
 
-@router.get("/pipeline/{pipeline_id}")
-def pipeline_details(pipeline_id: int):
-    return get_pipeline(pipeline_id)
+# -------------------------------
+# Execute pipeline
+# -------------------------------
+@router.post("/pipeline/{pipeline_id}/execute")
+def execute_pipeline(pipeline_id: int):
+    return run_pipeline(pipeline_id)
 
-@router.get("/pipeline/{pipeline_id}/download-script")
-def download_script(pipeline_id: int):
-    return download_pipeline_script(pipeline_id)
+# -------------------------------
+# Download pipeline as .py
+# -------------------------------
+@router.get("/pipeline/{pipeline_id}/download")
+def download_pipeline(pipeline_id: int):
+    file_path = Path("exported_pipelines") / f"pipeline_{pipeline_id}.py"
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Pipeline file not found")
+
+    return FileResponse(
+        path=file_path,
+        media_type="text/x-python",
+        filename=f"pipeline_{pipeline_id}.py",
+    )

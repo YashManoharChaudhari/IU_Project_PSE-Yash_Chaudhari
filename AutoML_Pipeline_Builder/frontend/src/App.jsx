@@ -1,29 +1,52 @@
-import { useState } from "react";
-import Header from "./components/Header";
+import { useEffect, useState } from "react";
+import { listPipelines, runPipeline } from "./api";
 import CreatePipeline from "./components/CreatePipeline";
 import PipelineList from "./components/PipelineList";
 import PipelineDetails from "./components/PipelineDetails";
 
 export default function App() {
-  const [selectedPipeline, setSelectedPipeline] = useState(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [pipelines, setPipelines] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    try {
+      setLoading(true);
+      const data = await listPipelines();
+      setPipelines(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to load pipelines", err);
+      setPipelines([]);
+    } finally {
+      setLoading(false);
+    }
+    const data = await listPipelines();
+console.log("PIPELINES RESPONSE:", data, Array.isArray(data));
+setPipelines(Array.isArray(data) ? data : []);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
 
   return (
-    <div className="app">
-      <Header />
+    <div className="container">
+      <h1>Auto-ML Pipeline Builder</h1>
 
-      <div className="container">
-        <CreatePipeline onCreated={() => setRefreshKey(k => k + 1)} />
+      <CreatePipeline onCreated={load} />
 
-        <PipelineList
-          key={refreshKey}
-          onSelect={setSelectedPipeline}
-        />
+      <PipelineList
+        pipelines={pipelines}
+        loading={loading}
+        onSelect={setSelected}
+        onRun={async id => {
+          const updated = await runPipeline(id);
+          setSelected(updated);
+          load();
+        }}
+      />
 
-        {selectedPipeline && (
-          <PipelineDetails pipelineId={selectedPipeline.id} />
-        )}
-      </div>
+      <PipelineDetails pipeline={selected} />
     </div>
   );
 }

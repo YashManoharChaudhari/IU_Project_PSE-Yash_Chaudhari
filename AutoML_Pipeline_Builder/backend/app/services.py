@@ -1,127 +1,193 @@
 import pandas as pd
-import threading
 from pathlib import Path
-from fastapi.responses import FileResponse
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, mean_squared_error
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, r2_score
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
-DATA_DIR = Path("backend/data")
-ARTIFACT_DIR = Path("backend/app/artifacts")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-
-PIPELINES = {}
+# ----------------------------
+# In-memory pipeline registry
+# ----------------------------
+PIPELINES = []
 PIPELINE_ID = 1
 
-def save_dataset(file):
-    path = DATA_DIR / file.filename
-    with open(path, "wb") as f:
-        f.write(file.file.read())
-    return {"dataset_path": str(path)}
+BASE_DIR = Path(__file__).resolve().parent
+EXPORT_DIR = BASE_DIR / "exported_pipelines"
+EXPORT_DIR.mkdir(exist_ok=True)
 
-def create_pipeline(req):
+# ----------------------------
+# Pipeline creation
+# ----------------------------
+def create_pipeline(dataset_path: str, target_column: str):
     global PIPELINE_ID
+
+    df = pd.read_csv(dataset_path)
+
+    problem_type, best_model, best_score = select_best_model(df, target_column)
+
     pipeline = {
         "id": PIPELINE_ID,
-        "dataset_path": req.dataset_path,
-        "target": req.target_column,
+        "dataset_path": dataset_path,
+        "target_column": target_column,
+        "problem_type": problem_type,
+        "model": best_model,
+        "metric": best_score,
         "status": "created",
-        "model": None,
-        "metric": None,
     }
-    PIPELINES[PIPELINE_ID] = pipeline
+
+    PIPELINES.append(pipeline)
     PIPELINE_ID += 1
+
+    generate_pipeline_py(
+        pipeline_id=pipeline["id"],
+        dataset_path=dataset_path,
+        target_column=target_column,
+        problem_type=problem_type,
+        selected_model=best_model,
+        metric=best_score,
+    )
+
     return pipeline
 
-def execute_pipeline_async(pipeline_id):
-    thread = threading.Thread(target=execute_pipeline, args=(pipeline_id,))
-    thread.start()
+# ----------------------------
+# List pipelines
+# ----------------------------
+def list_pipelines():
+    return PIPELINES
 
-def execute_pipeline(pipeline_id):
-    pipeline = PIPELINES[pipeline_id]
+# ----------------------------
+# Run pipeline (optional)
+# ----------------------------
+def run_pipeline(pipeline_id: int):
+    pipeline = next(p for p in PIPELINES if p["id"] == pipeline_id)
+
     df = pd.read_csv(pipeline["dataset_path"])
+    X = pd.get_dummies(df.drop(columns=[pipeline["target_column"]]), drop_first=True)
+    y = df[pipeline["target_column"]]
 
-    target = pipeline["target"]
-    X = pd.get_dummies(df.drop(columns=[target]), drop_first=True)
-    y = df[target]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
-
-    # Auto detect task type
-    is_regression = y.dtype != "object" and y.nunique() > 10
-
-    if is_regression:
-        models = {
-            "LinearRegression": LinearRegression(),
-            "RandomForestRegressor": RandomForestRegressor(),
-        }
-        best_score = float("inf")
-        metric_name = "mse"
+    if pipeline["problem_type"] == "classification":
+        model = (
+            LogisticRegression(max_iter=1000)
+            if pipeline["model"] == "LogisticRegression"
+            else RandomForestClassifier()
+        )
+        scorer = accuracy_score
     else:
+        model = (
+            LinearRegression()
+            if pipeline["model"] == "LinearRegression"
+            else RandomForestRegressor()
+        )
+        scorer = r2_score
+
+    model.fit(X_train, y_train)
+    pipeline["metric"] = scorer(y_test, model.predict(X_test))
+    pipeline["status"] = "completed"
+
+    return pipeline
+
+# ----------------------------
+# Model selection
+# ----------------------------
+def select_best_model(df, target_column):
+    X = pd.get_dummies(df.drop(columns=[target_column]), drop_first=True)
+    y = df[target_column]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    if y.dtype == "object" or y.nunique() <= 20:
+        problem_type = "classification"
         models = {
             "LogisticRegression": LogisticRegression(max_iter=1000),
             "RandomForestClassifier": RandomForestClassifier(),
         }
-        best_score = 0
-        metric_name = "accuracy"
+        scorer = accuracy_score
+    else:
+        problem_type = "regression"
+        models = {
+            "LinearRegression": LinearRegression(),
+            "RandomForestRegressor": RandomForestRegressor(),
+        }
+        scorer = r2_score
 
-    best_model = None
+    best_score = float("-inf")
+    best_model_name = None
 
     for name, model in models.items():
-        model.fit(X_train, y_train)
-        preds = model.predict(X_test)
+        pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", model),
+        ])
+        pipe.fit(X_train, y_train)
+        score = scorer(y_test, pipe.predict(X_test))
 
-        score = (
-            mean_squared_error(y_test, preds)
-            if is_regression
-            else accuracy_score(y_test, preds)
-        )
-
-        if (is_regression and score < best_score) or (
-            not is_regression and score > best_score
-        ):
+        if score > best_score:
             best_score = score
-            best_model = name
+            best_model_name = name
 
-    pipeline["model"] = best_model
-    pipeline["metric"] = {metric_name: round(best_score, 4)}
-    pipeline["status"] = "completed"
+    return problem_type, best_model_name, best_score
 
-    generate_pipeline_script(pipeline)
-
-def generate_pipeline_script(pipeline):
-    script = ARTIFACT_DIR / f"pipeline_{pipeline['id']}.py"
-
-    script.write_text(
-        f"""
-# Auto-generated ML pipeline
-# Model: {pipeline['model']}
-# Metric: {pipeline['metric']}
+# ----------------------------
+# Generate downloadable pipeline
+# ----------------------------
+def generate_pipeline_py(
+    pipeline_id: int,
+    dataset_path: str,
+    target_column: str,
+    problem_type: str,
+    selected_model: str,
+    metric: float,
+):
+    code = f'''
+# Auto-generated ML Pipeline
+# Problem type: {problem_type}
+# Selected model: {selected_model}
+# Metric: {metric}
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, r2_score
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
-df = pd.read_csv("{pipeline['dataset_path']}")
+df = pd.read_csv("{dataset_path}")
 
-X = pd.get_dummies(df.drop("{pipeline['target']}", axis=1), drop_first=True)
-y = df["{pipeline['target']}"]
+X = pd.get_dummies(df.drop(columns=["{target_column}"]), drop_first=True)
+y = df["{target_column}"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
-print("Ready to train {pipeline['model']}")
-"""
-    )
+if "{problem_type}" == "classification":
+    model = LogisticRegression(max_iter=1000) if "{selected_model}" == "LogisticRegression" else RandomForestClassifier()
+    scorer = accuracy_score
+else:
+    model = LinearRegression() if "{selected_model}" == "LinearRegression" else RandomForestRegressor()
+    scorer = r2_score
 
-def list_pipelines():
-    return list(PIPELINES.values())
+pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", model)
+])
 
-def get_pipeline(pipeline_id):
-    return PIPELINES.get(pipeline_id)
+pipeline.fit(X_train, y_train)
+score = scorer(y_test, pipeline.predict(X_test))
 
-def download_pipeline_script(pipeline_id):
-    path = ARTIFACT_DIR / f"pipeline_{pipeline_id}.py"
-    return FileResponse(path, filename=path.name)
+print("Final score:", score)
+'''
+
+    output_file = EXPORT_DIR / f"pipeline_{pipeline_id}.py"
+    output_file.write_text(code)
+
+    return output_file

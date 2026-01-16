@@ -1,35 +1,41 @@
 import axios from "axios";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+// FORCE local backend
+const API = axios.create({
+  baseURL: "http://127.0.0.1:8000",
+});
 
-export async function uploadDataset(file) {
-  const formData = new FormData();
-  formData.append("file", file);
+export const uploadDataset = async (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await API.post("/upload-dataset", form);
+  return res.data;
+};
 
-  const res = await axios.post(`${BASE_URL}/upload-dataset`, formData);
-  return res.data; 
-}
-
-export async function createPipeline(dataset_path, target_column) {
-  const res = await axios.post(`${API_BASE}/pipeline`, {
-    dataset_path,
-    target_column,
+export const createPipeline = async (datasetPath, target) => {
+  const res = await API.post("/pipeline", {
+    dataset_path: datasetPath,
+    target_column: target,
   });
-
   return res.data;
-}
+};
 
-export async function getPipelines() {
-  const res = await axios.get(`${API_BASE}/pipelines`);
+export const listPipelines = async () => {
+  const res = await API.get("/pipelines");
   return res.data;
-}
+};
 
-export async function getPipeline(id) {
-  const res = await axios.get(`${API_BASE}/pipeline/${id}`);
+export const runPipeline = async (id) => {
+  const res = await API.post(`/pipeline/${id}/execute`);
   return res.data;
-}
+};
 
-export async function executePipeline(id) {
-  const res = await axios.post(`${API_BASE}/pipeline/${id}/execute`);
-  return res.data;
-}
+export const downloadPipelinePy = (pipelineId) => {
+  const baseUrl =
+    import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+  window.open(
+    `${baseUrl}/pipeline/${pipelineId}/download-py`,
+    "_blank"
+  );
+};
