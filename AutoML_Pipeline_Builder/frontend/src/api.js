@@ -39,3 +39,5 @@ export const downloadPipelinePy = (pipelineId) => {
     "_blank"
   );
 };
+
+export default API;
