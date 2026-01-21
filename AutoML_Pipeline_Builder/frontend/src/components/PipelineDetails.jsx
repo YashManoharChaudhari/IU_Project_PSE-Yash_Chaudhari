@@ -10,7 +10,7 @@ export default function PipelineDetails({ pipeline }) {
   const handleDownload = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE}/pipeline/${pipeline.id}/download`
+        `${API_BASE}/pipeline/${pipeline.id}/download`
       );
 
       if (!response.ok) {
