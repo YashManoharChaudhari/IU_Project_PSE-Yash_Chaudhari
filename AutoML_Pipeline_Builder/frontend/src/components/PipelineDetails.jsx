@@ -1,3 +1,4 @@
+const API_BASE = "https://automlpipelinebuilder.onrender.com";
 export default function PipelineDetails({ pipeline }) {
   if (!pipeline) {
     return (
